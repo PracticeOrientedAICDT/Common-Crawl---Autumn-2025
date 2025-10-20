@@ -1,0 +1,136 @@
+from openai import OpenAI
+import csv
+from time import sleep
+import requests
+import json
+from typing import Dict, Any
+
+# Initialize OpenAI client (ensure your API key is set in environment variable or here)
+client = OpenAI(api_key = "")
+
+def generate_search_query(company_row: dict) -> str:
+    """
+    Generates the most effective Google search query to find a company's official website.
+    Uses all available company fields intelligently.
+    """
+
+    print("\n--- Generating search query ---")
+    print(f"Company input: {company_row}")
+
+    system_prompt = (
+        "You are an expert at constructing Google search queries to identify a company's official website. "
+        "You will receive a record from the UK Companies House dataset. "
+        "Your goal: produce a single, short search query that maximizes the chance of finding the company's real website. "
+        "You may use any of the following fields if useful: company name, company number, address, postcode, SIC codes. "
+        "Use them only when they help disambiguate the company or improve accuracy. "
+        "Prefer natural phrases that humans might search, not full sentences. "
+        "Do not add commentary or explanations — output only the search query string."
+    )
+
+    user_prompt = f"""
+    Company name: {company_row.get('Company name')}
+    Company number: {company_row.get('Company number')}
+    Address: {company_row.get('Address')}
+    Postcode: {company_row.get('Postcode')}
+    SIC codes: {', '.join(company_row.get('Sic codes', []))}
+    """
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            max_tokens=60,
+            temperature=0.4
+        )
+        query = response.choices[0].message.content.strip()
+        print(f"✅ Generated query: {query}")
+        return query
+    except Exception as e:
+        print(f"❌ Error generating query for {company_row.get('Company name')}: {e}")
+        return ""
+
+
+def load_companies_from_csv(filepath: str):
+    """
+    Loads company data from a CSV and normalizes fields.
+    """
+    print(f"\n📂 Loading Companies House data from {filepath}...")
+    companies = []
+    with open(filepath, newline='', encoding='utf-8') as csvfile:
+        reader = csv.DictReader(csvfile)
+        for i, row in enumerate(reader, start=1):
+            company = {
+                "Company number": row.get("CompanyNumber", "").strip(),
+                "Company name": row.get("CompanyName", "").strip(),
+                "Address": row.get("RegAddress.AddressLine1", "").strip(),
+                "Postcode": row.get("RegAddress.PostCode", "").strip(),
+                "Sic codes": [code.strip() for code in row.get("SICCode.SicText_1", "").split(",") if code.strip()]
+            }
+            companies.append(company)
+            if i % 50 == 0:
+                print(f"Loaded {i} rows so far...")
+    print(f"✅ Finished loading {len(companies)} companies.\n")
+    return companies
+
+
+def SerphSearch(search_string: str, api_key: str) -> Dict[str, Any]:
+    """
+    Performs a Google search using the Serper API, returning the structured JSON result.
+    """
+    if not search_string:
+        print("⚠️ Empty search string provided, skipping Serper call.")
+        return {"error": "Empty search string"}
+
+    print(f"\n🌐 Searching with Serper: {search_string}")
+
+    url = "https://google.serper.dev/search"
+    payload = json.dumps({
+        "q": search_string,
+        "location": "United Kingdom",
+        "gl": "gb"
+    })
+    headers = {
+        "X-API-KEY": api_key,
+        "Content-Type": "application/json"
+    }
+
+    try:
+        response = requests.post(url, headers=headers, data=payload)
+        response.raise_for_status()
+        json_result = response.json()
+        print(f"✅ Serper returned {len(json_result.get('organic', []))} organic results.")
+        return json_result
+    except requests.exceptions.HTTPError as http_err:
+        print(f"❌ HTTP error: {http_err} - {response.text}")
+        return {"error": f"HTTP Error: {http_err}", "details": response.text}
+    except requests.exceptions.RequestException as req_err:
+        print(f"❌ Request error: {req_err}")
+        return {"error": f"Request Error: {req_err}"}
+
+
+# === MAIN PIPELINE ===
+s_api_key = ""
+
+#Add this path
+csv_path = ""
+
+companies = load_companies_from_csv(csv_path)
+
+print(f"🚀 Starting pipeline for {len(companies)} companies...\n")
+
+for idx, company in enumerate(companies, start=1):
+    print(f"\n🔹 Processing company {idx}/{len(companies)}: {company['Company name']}")
+    query = generate_search_query(company)
+    results = SerphSearch(query, s_api_key)
+    print(f"Results summary for {company['Company name']}:")
+    if "organic" in results:
+        for i, r in enumerate(results["organic"][:3], start=1):
+            print(f"  {i}. {r.get('title', '')} - {r.get('link', '')}")
+    else:
+        print(f"  ⚠️ No organic results found or error: {results.get('error')}")
+    sleep(0.5)  # Adjust delay if hitting rate limits
+
+print("\n✅ Pipeline complete.")
