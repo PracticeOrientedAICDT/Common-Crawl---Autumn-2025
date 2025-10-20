@@ -84,14 +84,17 @@ def SerphSearch(search_string: str, api_key: str) -> Dict[str, Any]:
         print("⚠️ Empty search string provided, skipping Serper call.")
         return {"error": "Empty search string"}
 
-    print(f"\n🌐 Searching with Serper: {search_string}")
+    # 🔧 Remove leading/trailing quotes, apostrophes, whitespace
+    clean_query = search_string.strip().strip('"').strip("'")
+    print(f"\n🌐 Searching with Serper: {clean_query}")
 
     url = "https://google.serper.dev/search"
     payload = json.dumps({
-        "q": search_string,
+        "q": clean_query,
         "location": "United Kingdom",
         "gl": "gb"
     })
+
     headers = {
         "X-API-KEY": api_key,
         "Content-Type": "application/json"
