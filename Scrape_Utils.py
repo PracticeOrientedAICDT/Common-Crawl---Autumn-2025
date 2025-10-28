@@ -10,6 +10,7 @@ import json
 from urllib.parse import urlparse
 import pandas as pd
 import random
+import jellyfish
 
 
 #scrape to markdown function
@@ -245,7 +246,7 @@ def load_companies_from_csv(filepath: str):
     print(f"✅ Finished loading {len(companies)} companies.\n")
     return companies
 import re
-import Levenshtein
+from jellyfish  import levenshtein_distance
 
 def _clean_string(text: str) -> str:
     """Helper function to normalize and clean company/URL strings."""
@@ -296,41 +297,30 @@ def URL_similarity_match(registered_name: str, url_fragment: str) -> bool:
         return False
         
     # 3. Compute the Levenshtein similarity ratio
-    # Levenshtein.ratio() returns a value between 0.0 and 1.0
-    ratio = Levenshtein.ratio(cleaned_name, cleaned_url)
+    # --- FIX: START ---
     
+    # First, get the raw Levenshtein distance
+    lev_dist = jellyfish.levenshtein_distance(cleaned_name, cleaned_url)
+    
+    # Next, convert the distance to a 0.0-1.0 similarity ratio
+    len_sum = len(cleaned_name) + len(cleaned_url)
+    
+    if len_sum == 0:
+        # Both strings were empty, so they are 100% similar
+        similarity_ratio = 1.0
+    else:
+        # This is the formula we discussed
+        similarity_ratio = (len_sum - lev_dist) / len_sum
+        
+    # --- FIX: END ---
+        
     # 4. Define the threshold
     threshold = 0.9
     
     # 5. Return True if ratio is at or above the threshold, else False
-    return ratio >= threshold
-
-# --- Examples ---
-
-# Example 1: Clear Match
-name1 = "Smith's Bakery Ltd"
-url1 = "smiths-bakery"
-print(f"'{name1}' vs '{url1}': {URL_similarity_match(name1, url1)}")
-# Cleaned: 'smithsbakery' vs 'smithsbakery' -> True
-
-# Example 2: Close Match (passes 0.9 threshold)
-name2 = "ACME Corporation LLP"
-url2 = "acmecorp"
-print(f"'{name2}' vs '{url2}': {URL_similarity_match(name2, url2)}")
-# Cleaned: 'acmecorporation' vs 'acmecorp' -> True
-
-# Example 3: Misspelling (below threshold)
-name3 = "Quick Fox Solutions"
-url3 = "qwik-fox-solutlons" # 'k' instead of 'ck', 'l' instead of 'i'
-print(f"'{name3}' vs '{url3}': {URL_similarity_match(name3, url3)}")
-# Cleaned: 'quickfoxsolutions' vs 'qwikfoxsolutlons' -> False
-
-# Example 4: Different Company
-name4 = "Blue Widget Limited"
-url4 = "red-hammer-inc"
-print(f"'{name4}' vs '{url4}': {URL_similarity_match(name4, url4)}")
-# Cleaned: 'bluewidget' vs 'redhammerinc' -> False
-
+    # --- FIX: START ---
+    # The check is now correctly comparing the ratio to the threshold
+    return similarity_ratio >= threshold
 
 
 def extract_test_case(row_number: Optional[int] = None) -> List[str]:
