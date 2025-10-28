@@ -6,83 +6,77 @@ import pandas as pd
 from typing import Dict, Any
 from SerphAPI import SerphSearch
 from Scrape_Utils import ScrapeToMarkdown
+from Scrape_Utils import search_and_scrape
+from Scrape_Utils import SerphSearch
+import os
+from google import genai
 
 s_api_key = os.environ.get('SERPER_API_KEY')
 
-SEARCH_QUERY = "CARLISLE REFRIGERATION LIMITED WA14 1DW company website"
+SEARCH_QUERY = "HGB CONSULTING LIMITED E15 4QR company website"
 OUTPUT_FILENAME = "search_results.csv"
-
-def convert_json_to_csv(json_data: Dict[str, Any], filename: str):
-    """
-    Converts the nested search JSON data into a flat CSV file using pandas.
-    """
-    # Check for the primary list of results, often 'organic' or 'news'
-    if 'organic' not in json_data:
-        print("Error: JSON data does not contain the 'organic' results list needed for CSV conversion.")
-        return
-
-    # Use json_normalize to flatten the list of dictionaries
-    # This automatically handles nested fields by creating new columns (e.g., 'title', 'snippet', 'sitelinks.0.title')
-    try:
-        df = pd.json_normalize(json_data['organic'])
-        
-        # Clean up column names by replacing dots with underscores
-        df.columns = df.columns.str.replace('.', '_', regex=False)
-
-        # Save the DataFrame to a CSV file
-        df.to_csv(filename, index=False, encoding='utf-8')
-        
-        print(f"Successfully saved {len(df)} records to **{filename}**")
-        print("Top 5 columns created:", list(df.columns[:5]))
-        
-    except Exception as e:
-        print(f"An error occurred during CSV conversion: {e}")
 
 
 if __name__ == "__main__":
-    print(f"Starting search for: '{SEARCH_QUERY}'...")
-    # print(s_api_key)
-    # 1. Call the SerphSearch function to get the JSON result
-    results_json = SerphSearch(SEARCH_QUERY, s_api_key)
-    
-    # 2. Check if the search was successful
-    if 'error' not in results_json:
-        # 3. Convert the returned JSON (Python dictionary) to a CSV file
-        convert_json_to_csv(results_json, OUTPUT_FILENAME)
+    # Ensure the API key is set
+    if not s_api_key:
+        print("Error: SERPER_API_KEY environment variable not set.")
     else:
-        print("Script terminated due to a search error.")
-    
-    if results_json.get('organic'):
-            # 3. Get the first result and extract its URL
-            first_result = results_json['organic'][0]
-            url_to_scrape = first_result.get('link')
+        # Call the main function to get the data
+        all_data = search_and_scrape(SEARCH_QUERY, s_api_key)
+        
+        if all_data:
+            print("\n==============================================")
+            print(f"✅ Process finished. Scraped {len(all_data)} pages.")
+            print("Data structure (showing titles and filenames):")
             
-            if url_to_scrape:
-                print(f"\n--- Now scraping first result: '{first_result.get('title')}' ---")
-                print(f"URL: {url_to_scrape}")
-                
-                # 4. Call the scraping function from Scrape_Utils
-                markdown_content = ScrapeToMarkdown(url_to_scrape)
-                
-                # 5. Print the scraped content (or a failure message)
-                if markdown_content:
-                    print("\n Scraping Successful. Content (first 500 chars):")
-                    print("-------------------------------------------------")
-                    print(markdown_content[:500] + "...")
-                    print("-------------------------------------------------")
-                    cleaned_url = re.sub(r'^https?://', '', url_to_scrape)
-                    safe_filename = re.sub(r'[^a-zA-Z0-9]', '_', cleaned_url)
-                    markdown_filename = f"{safe_filename}.md"
-                    try:
-                        with open(markdown_filename, 'w', encoding='utf-8') as f:
-                         f.write(markdown_content)
-                         print(f"✅ Content successfully saved to file: '{markdown_filename}'")
-                    except IOError as e:
-                        print(f"❌ Error saving file: {e}")
-                       
-                else:
-                    print("Failed to scrape the webpage.")
-            else:
-                print("Could not find a URL link in the first search result.")
-    else:
-            print("No organic search results found to scrape.")
+            for item in all_data:
+                print(f"  - Pos {item['position']}: {item['title']} ({item['filename']})")
+                print(f"    Content length: {len(item['markdown_content'])} chars")
+            
+            # You would now pass 'all_data' to your LLM function, e.g.:
+            # llm_response = ask_gemini_with_context(all_data)
+            
+        else:
+            print("\n==============================================")
+            print("❌ Process finished. No data was scraped.")
+
+entity_2 =all_data[0]['markdown_content']  # Example: using the first scraped page content
+print(entity_2)
+# Configure with your API key (using environment variable)
+g_api_key=os.environ["GEMINI_API_KEY"]
+
+# 1. Initialize the client.
+# It automatically finds the "GEMINI_API_KEY" from your os.environ
+try:
+    client = genai.Client()
+except Exception as e:
+    print(f"Error initializing client. Is GEMINI_API_KEY set? \nError: {e}")
+    exit()
+
+# 2. Define your entities
+entity_1 = SEARCH_QUERY
+entity_2 = all_data[0]['markdown_content']  # Using the first scraped page content
+
+# 3. Create your prompt
+prompt = f"""
+You are an entity matching expert. Compare the two entities below.
+Entity 1 is extracted from companies house data, Entity 2 is extracted from web scraped data and cleaned data from web searches for the company.
+Respond with only'Yesthey are the same entity' or 'No' if they are not.
+
+Entity 1: "{entity_1}"
+Entity 2: "{entity_2}"
+Answer:
+"""
+
+# 4. Generate content using the CLIENT
+#    This is the main fix:
+response = client.models.generate_content(
+    model='gemini-2.5-flash-lite',  # Pass the model name as an argument
+    contents=prompt             # Pass the prompt to the 'contents' argument
+)
+
+print(response.text.strip())
+
+# Example Output:
+# Yes
