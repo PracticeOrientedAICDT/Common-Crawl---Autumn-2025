@@ -112,12 +112,16 @@ def search_and_scrape(search_query: str, api_key: str) -> List[Dict[str, Any]]:
             print("❌ Skipping: No URL found for this result.")
             continue  # Skip to the next result in the loop
 
-        # --- START: UPDATE ---
-        # Filter out URLs ending with .gov.uk
-        if url_to_scrape.endswith(".gov.uk"):
-            print(f"❌ Skipping URL: {url_to_scrape} (domain .gov.uk)")
-            continue  # Skip to the next result in the loop
-        # --- END: UPDATE ---
+        try:
+            # We need to parse the URL to check its domain (netloc)
+            parsed_url = urlparse(url_to_scrape)
+            if parsed_url.netloc.endswith(".gov.uk"):
+                print(f"❌ Skipping URL: {url_to_scrape} (domain .gov.uk)")
+                continue  # Skip to the next result in the loop
+        except Exception as e:
+            # Catch any potential URL parsing errors
+            print(f"⚠️  Error parsing URL for filter: {e}. Skipping.")
+            continue
             
         print(f"URL: {url_to_scrape}")
         
@@ -353,7 +357,7 @@ def extract_test_case(row_number: Optional[int] = None) -> List[str]:
     
     # These are the 1-based (spreadsheet) column numbers you requested.
     # We subtract 1 to get the 0-based index for pandas.
-    COLUMN_INDICES = [2-1, 3-1, 4-1, 11-1, 30-1, 31-1]
+    COLUMN_INDICES = [2-1, 3-1, 4-1, 13-1, 30-1, 31-1]
     FILENAME = "ground_truth_dataset.csv"
     
     try:
