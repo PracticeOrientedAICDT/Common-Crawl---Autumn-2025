@@ -1,0 +1,415 @@
+# combined_scraper.py
+import os
+import json
+import random
+import re
+from urllib.parse import urlparse
+from time import sleep
+from typing import List, Dict, Any, Optional
+import pandas as pd
+import requests
+from bs4 import BeautifulSoup
+import html2text
+from dotenv import load_dotenv
+from google import genai
+import jellyfish
+import csv
+from urllib.parse import urlparse
+
+# -----------------------------
+# Load API keys from .env
+# -----------------------------
+load_dotenv()
+SERPER_API_KEY = os.environ.get("SERPER_API_KEY")
+GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
+
+if not SERPER_API_KEY or not GOOGLE_API_KEY:
+    raise ValueError("SERPER_API_KEY or GOOGLE_API_KEY not set in .env file!")
+
+# -----------------------------
+# Configuration
+# -----------------------------
+NUM_TRIALS = 100
+OUTPUT_JSON = "/Users/mm25873/Documents/Practice Project 1/Outputs/scraper_results_3.json"
+OUTPUT_CSV = "/Users/mm25873/Documents/Practice Project 1/Outputs/scraper_results_3.csv"
+
+# -----------------------------
+# Utility functions
+# -----------------------------
+
+def ScrapeToMarkdown(url: str) -> Optional[str]:
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        response = requests.get(url, headers=headers, timeout=15)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.content, 'html.parser')
+        for tag in soup(['script', 'style', 'nav', 'footer', 'header', 'form', 'aside']):
+            tag.decompose()
+        body_content = str(soup.body) if soup.body else str(soup)
+        h = html2text.HTML2Text()
+        h.ignore_links = False
+        h.ignore_images = True
+        h.body_width = 0
+        markdown_text = h.handle(body_content)
+        clean_text = '\n'.join([line.strip() for line in markdown_text.splitlines() if line.strip()])
+        return clean_text
+    except Exception as e:
+        print(f"Failed to scrape {url}: {e}")
+        return None
+
+def SerphSearch(search_string: str, api_key: str) -> Dict[str, Any]:
+    url = "https://google.serper.dev/search"
+    payload = json.dumps({"q": search_string,"location":"United Kingdom","gl":"gb"})
+    headers = {'X-API-KEY': api_key,'Content-Type':'application/json'}
+    try:
+        response = requests.post(url, headers=headers, data=payload)
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        print(f"Search failed: {e}")
+        return {"error": str(e)}
+
+def _clean_string(text: str) -> str:
+    text = text.lower()
+    for suffix in ['limited liability partnership','limited','ltd','llp']:
+        text = text.replace(suffix,'')
+    text = re.sub(r'[^a-z0-9]', '', text)
+    return text
+
+def URL_similarity_match(registered_name: str, url_fragment: str) -> bool:
+    cleaned_name = _clean_string(registered_name)
+    cleaned_url = _clean_string(url_fragment)
+    if not cleaned_name:
+        return False
+    lev_dist = jellyfish.levenshtein_distance(cleaned_name, cleaned_url)
+    similarity_ratio = (len(cleaned_name)+len(cleaned_url)-lev_dist)/(len(cleaned_name)+len(cleaned_url)) if (len(cleaned_name)+len(cleaned_url))>0 else 1.0
+    return similarity_ratio >= 0.9
+
+def extract_test_case(row_number: Optional[int] = None) -> List[str]:
+    COLUMN_INDICES = [1,2,3,12,29,30]
+    FILENAME = "/Users/mm25873/Documents/Practice Project 1/Companies House data/Trustpilot process/ground_truth_dataset.csv"
+    
+    try:
+        df = pd.read_csv(FILENAME, header=0)
+        num_data_rows = len(df)
+        if num_data_rows == 0: return []
+        selected_row_index = random.randint(0,num_data_rows-1) if row_number is None else row_number-2
+        if not (0 <= selected_row_index < num_data_rows): return []
+        selected_data = df.iloc[selected_row_index, COLUMN_INDICES]
+        return [str(item) for item in selected_data]
+    except Exception as e:
+        print(f"Failed to extract test case: {e}")
+        return []
+
+def clean_base_url(raw_url: str) -> Optional[str]:
+    try:
+        parsed = urlparse(raw_url if '://' in raw_url else 'http://'+raw_url)
+        return f"{parsed.scheme}://{parsed.netloc}"
+    except:
+        return None
+
+def get_domain_fragment(url: str) -> str:
+    try:
+        netloc = urlparse(url).netloc
+        if netloc.startswith("www."): netloc = netloc[4:]
+        return netloc.split('.')[0]
+    except:
+        return ""
+
+def check_html_match(markdown_content: str, company_name: str, postcode: str) -> bool:
+    return company_name.lower() in markdown_content.lower() or postcode.lower() in markdown_content.lower()
+
+def create_llm_prompt(company_data: Dict[str, Any], scraped_content: str) -> str:
+    """
+    Creates a high-quality LLM prompt for conditional matching of company info
+    to scraped website content using rules and demonstrations.
+
+    Args:
+        company_data: Dict with keys 'company_name', 'company_number', 'postcode', 'sic_codes'
+        scraped_content: The Markdown content of the scraped webpage
+
+    Returns:
+        A string suitable for input to Gemini / GenAI.
+    """
+    sic_code_str = ", ".join(company_data['sic_codes']) if company_data['sic_codes'] else "N/A"
+
+    # Truncate content to 15k chars
+    scraped_text_trunc = scraped_content[:15000]
+
+    prompt = f"""
+    Your task is to verify if a scraped webpage belongs to a given company.
+
+    Company info:
+    - Name: {company_data['company_name']}
+    - Company number: {company_data['company_number']}
+    - Postcode: {company_data['postcode']}
+    - SIC codes: {sic_code_str}
+
+    Scraped webpage content (truncated):
+    {scraped_text_trunc}
+
+    Question: Based on the above content, does this webpage belong to the company? 
+    Answer with 'Yes' if it matches, otherwise 'No'. Do NOT provide any URLs.
+    """
+    return prompt
+
+
+def parse_llm_response(response_text: str):
+    if not response_text:
+        return "No"
+    return "Yes" if response_text.lower().startswith("yes") else "No"
+
+
+import pandas as pd
+
+def save_results_to_csv(trials_data: list, output_csv: str):
+    """
+    Saves the scraper + analysis results to CSV with full logging and LLM decision.
+
+    Args:
+        trials_data: List of trial dicts containing scraped results and LLM/string match info
+        output_csv: Path to the output CSV file
+    """
+    rows = []
+
+    for trial in trials_data:
+        trial_number = trial["trial_number"]
+        gt = trial["ground_truth_data"]
+        search_query = trial.get("search_query_used", "")
+        scraped = trial.get("scraped_results", [])
+        string_match = trial.get("string_match_result", False)
+        llm_result = trial.get("llm_match_result", "")
+        llm_url = trial.get("llm_match_url", "")
+
+        # Prepare scraped results (up to 3)
+        scraped_rows = []
+        for i in range(3):
+            if i < len(scraped):
+                scraped_rows.append(scraped[i]["link"])
+                scraped_rows.append(scraped[i]["markdown_content"])
+            else:
+                scraped_rows.append("")  # empty url
+                scraped_rows.append("")  # empty markdown
+
+        # Determine chosen URL (string match > LLM > first scraped)
+        if string_match and trial.get("string_match_url"):
+            chosen_url = trial["string_match_url"]
+        elif llm_result.lower() == "yes":
+            chosen_url = llm_url
+        elif scraped:
+            chosen_url = scraped[0]["link"]
+        else:
+            chosen_url = ""
+
+        row = {
+            "trial_number": trial_number,
+            "company_number": gt["company_number"],
+            "company_name": gt["company_name"],
+            "postcode": gt["postcode"],
+            "sic_codes": ", ".join(gt["sic_codes"]),
+            "ground_truth_url": gt["ground_truth_url"],
+            "search_query_used": search_query,
+            "scraped_result_1_url": scraped_rows[0],
+            "scraped_result_1_markdown": scraped_rows[1],
+            "scraped_result_2_url": scraped_rows[2],
+            "scraped_result_2_markdown": scraped_rows[3],
+            "scraped_result_3_url": scraped_rows[4],
+            "scraped_result_3_markdown": scraped_rows[5],
+            "string_match_result": string_match,
+            "llm_match_result": llm_result,
+            "llm_match_url": llm_url,
+            "chosen_url": chosen_url
+        }
+        rows.append(row)
+
+    # Save to CSV
+    df = pd.DataFrame(rows)
+    df.to_csv(output_csv, index=False, encoding='utf-8')
+    print(f"✅ Saved {len(df)} trials to CSV: {output_csv}")
+
+
+# -----------------------------
+# Main script
+# -----------------------------
+def main():
+    llm_client = genai.Client()
+    all_trials_data = []
+    analysis_rows = []
+    markdown_cache = {}  # key: url, value: markdown content
+
+
+    for i in range(NUM_TRIALS):
+        print(f"\n--- Trial {i+1}/{NUM_TRIALS} ---")
+        test_case = extract_test_case()
+        if not test_case or len(test_case)<6: continue
+        company_number, ground_truth_url_raw, company_name, postcode, sic1, sic2 = test_case
+        ground_truth_url = clean_base_url(ground_truth_url_raw)
+        sic_codes = [s for s in [sic1,sic2] if str(s).lower()!='nan']
+        if not ground_truth_url: continue
+
+        search_query = f"{company_name} {postcode} {company_number} company website"
+        search_results = SerphSearch(search_query,SERPER_API_KEY).get('organic',[])
+
+
+        # Define a list of domains you want to exclude
+        EXCLUDED_DOMAINS = [
+            ".gov.uk",
+            ".gov",
+            "open.endole.co.uk",
+            "find-and-update.company-information.service.gov.uk",
+            "northdata.com"
+        ]
+
+        # Filter out .gov and .gov.uk domains
+        filtered_results = []
+        for result in search_results:
+            url = result.get('link')
+            if not url:
+                continue
+            try:
+                parsed = urlparse(url)
+                domain = parsed.netloc.lower()
+
+                # Skip any excluded domains
+                if any(excluded in domain for excluded in EXCLUDED_DOMAINS):
+                    print(f"❌ Skipping excluded domain: {url}")
+                    continue
+
+                filtered_results.append(result)
+
+                # Stop once we have 3 valid results
+                if len(filtered_results) == 3:
+                    break
+
+            except Exception as e:
+                print(f"⚠️ Error filtering URL '{url}': {e}")
+                continue
+
+        # Replace the original search_results with the filtered list
+        search_results = filtered_results
+
+        # Optional: warning if fewer than 3 valid sites found
+        if len(search_results) < 3:
+            print(f"⚠️ Only {len(search_results)} valid non-excluded results found.")
+
+        # Add markdown content for each result
+        for result in search_results:
+            url = result.get('link')
+            if not url:
+                result['markdown_content'] = ""
+                continue
+
+            if url in markdown_cache:
+                markdown_content = markdown_cache[url]
+            else:
+                markdown_content = ScrapeToMarkdown(url)
+                if markdown_content:
+                    markdown_cache[url] = markdown_content
+            result['markdown_content'] = markdown_content or ""
+
+        selected_url = ""
+        match_method = "None"
+
+        for pos,result in enumerate(search_results,1):
+            url = result.get('link')
+            title = result.get('title','')
+            if not url: continue
+            domain_frag = get_domain_fragment(url)
+            if URL_similarity_match(company_name, domain_frag):
+                selected_url = url
+                match_method = "String"
+                break
+
+            if url in markdown_cache:
+                markdown_content = markdown_cache[url]
+            else:
+                markdown_content = ScrapeToMarkdown(url)
+                if markdown_content:
+                    markdown_cache[url] = markdown_content
+
+            if markdown_content and check_html_match(markdown_content, company_name, postcode):
+                selected_url = url
+                match_method = "HTML"
+                break
+        # Conditional LLM
+        if not selected_url:
+            for pos,result in enumerate(search_results,1):
+                url = result.get('link')
+
+
+                if url in markdown_cache:
+                    markdown_content = markdown_cache[url]
+                else:
+                    markdown_content = ScrapeToMarkdown(url)
+                    if markdown_content:
+                        markdown_cache[url] = markdown_content
+
+                if not markdown_content: continue
+                prompt = create_llm_prompt({"company_name":company_name,"company_number":company_number,"postcode":postcode,"sic_codes":sic_codes}, markdown_content)
+                try:
+                    response = llm_client.models.generate_content(model='gemini-2.5-flash-lite', contents=prompt)
+                    llm_answer = parse_llm_response(response.text)
+                    if llm_answer == "Yes":
+                        selected_url = url  # already scraped URL
+                        match_method = "LLM"
+                        break
+
+                except Exception as e:
+                    print(f"LLM call failed: {e}")
+                    continue
+
+        trial_data = {
+            "trial_number": i+1,
+            "ground_truth_data":{"company_number":company_number,"company_name":company_name,"postcode":postcode,"sic_codes":sic_codes,"ground_truth_url":ground_truth_url},
+            "search_query_used": search_query,
+            "scraped_results": search_results,
+            "selected_url": selected_url,
+            "match_method": match_method
+        }
+        all_trials_data.append(trial_data)
+
+        # For CSV
+        row = {
+            "trial_number": i+1,
+            "company_number": company_number,
+            "company_name": company_name,
+            "ground_truth_url": ground_truth_url,
+            "selected_url": selected_url,
+            "match_method": match_method
+        }
+        for j,res in enumerate(search_results[:3],1):
+            row[f"scrape_{j}_url"] = res.get('link','')
+            row[f"scrape_{j}_title"] = res.get('title','')
+        analysis_rows.append(row)
+
+    # --- Save JSON ---
+    with open(OUTPUT_JSON,'w',encoding='utf-8') as f:
+        json.dump(all_trials_data,f,indent=2,ensure_ascii=False)
+
+    # --- Save CSV ---
+    # --- Save CSV with full scraped + LLM logging ---
+    save_results_to_csv(all_trials_data, OUTPUT_CSV)
+    print(f"\n✅ Saved JSON to {OUTPUT_JSON} and CSV to {OUTPUT_CSV}")
+
+
+    # --- Metrics ---
+    total_trials = len(all_trials_data)
+    matched_at_all = sum(1 for t in all_trials_data if t["selected_url"])
+    matched_string = sum(1 for t in all_trials_data if t["match_method"]=="String")
+    matched_html = sum(1 for t in all_trials_data if t["match_method"]=="HTML")
+    matched_llm = sum(1 for t in all_trials_data if t["match_method"]=="LLM")
+    top1_matches = sum(1 for t in all_trials_data if t["scraped_results"] and t["selected_url"]==t["scraped_results"][0].get('link',''))
+
+    print("\n--- Metrics ---")
+    print(f"Total trials: {total_trials}")
+    print(f"Matched at all: {matched_at_all} ({matched_at_all/total_trials*100:.2f}%)")
+    print(f"Matched by String: {matched_string} ({matched_string/total_trials*100:.2f}%)")
+    print(f"Matched by HTML/content: {matched_html} ({matched_html/total_trials*100:.2f}%)")
+    print(f"Matched by LLM: {matched_llm} ({matched_llm/total_trials*100:.2f}%)")
+    print(f"Correct URL in search position 1: {top1_matches} ({top1_matches/total_trials*100:.2f}%)")
+
+if __name__=="__main__":
+    main()
+
