@@ -118,8 +118,15 @@ def get_domain_fragment(url: str) -> str:
     except:
         return ""
 
-def check_html_match(markdown_content: str, company_name: str, postcode: str) -> bool:
-    return company_name.lower() in markdown_content.lower() or postcode.lower() in markdown_content.lower()
+def check_md_match(markdown_content: str, company_name: str, postcode: str) -> bool:
+    has_pos_match = company_name.lower() in markdown_content.lower() or postcode.lower() in markdown_content.lower()
+    if not has_pos_match:
+        return False
+    excl_URL_frags = ['open.endole.co.uk','uk.globaldatabase.com','companywall.co.uk','bringo.co.uk']
+    for frag in excl_URL_frags:
+        if frag in markdown_content.lower():
+            return False
+    return True
 
 def create_llm_prompt(company_data: Dict[str, Any], scraped_content: str) -> str:
     """
@@ -159,7 +166,7 @@ def create_llm_prompt(company_data: Dict[str, Any], scraped_content: str) -> str
 def parse_llm_response(response_text: str):
     if not response_text:
         return "No"
-    return "Yes" if response_text.lower().startswith("yes") else "No"
+    return "Yes" if response_text.lower().startswith("yes","LINK") else "No"
 
 
 import pandas as pd
