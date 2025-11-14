@@ -234,7 +234,7 @@ def save_results_to_csv(trials_data: list, output_csv: str):
     # Save to CSV
     df = pd.DataFrame(rows)
     df.to_csv(output_csv, index=False, encoding='utf-8')
-    print(f"✅ Saved {len(df)} trials to CSV: {output_csv}")
+    print(f" Saved {len(df)} trials to CSV: {output_csv}")
 
 
 # -----------------------------
@@ -299,7 +299,7 @@ def main():
 
         # Optional: warning if fewer than 3 valid sites found
         if len(search_results) < 3:
-            print(f"⚠️ Only {len(search_results)} valid non-excluded results found.")
+            print(f" Only {len(search_results)} valid non-excluded results found.")
 
         # Add markdown content for each result
         for result in search_results:
@@ -398,7 +398,7 @@ def main():
     # --- Save CSV ---
     # --- Save CSV with full scraped + LLM logging ---
     save_results_to_csv(all_trials_data, OUTPUT_CSV)
-    print(f"\n✅ Saved JSON to {OUTPUT_JSON} and CSV to {OUTPUT_CSV}")
+    print(f"\n Saved JSON to {OUTPUT_JSON} and CSV to {OUTPUT_CSV}")
 
 
     # --- Metrics ---
