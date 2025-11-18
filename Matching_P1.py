@@ -11,7 +11,7 @@ import time
 import jellyfish
 # --- Configuration ---
 INPUT_JSON = "scraper_results_Random_CH.json"
-OUTPUT_CSV = "analysis_results_CH.csv"
+OUTPUT_CSV = "analysis_results_JSON_LLM.csv"
 # ---------------------
 
 
@@ -121,6 +121,53 @@ def clean_base_url(raw_url: str) -> str | None:
     except Exception:
         return None
 
+
+def parse_llm_output(llm_response: str) -> Dict[str, Any]:
+    """
+    Parses LLM response and extracts structured fields.
+    
+    Returns a dict with:
+    - is_official_website: bool
+    - official_url: str or None
+    - found_embedded_link: bool  
+    - embedded_url: str or None
+    - reasoning: str
+    - parse_success: bool (did parsing work?)
+    """
+    result = {
+        "is_official_website": False,
+        "official_url": None,
+        "found_embedded_link": False,
+        "embedded_url": None,
+        "reasoning": "",
+        "parse_success": False
+    }
+    
+    try:
+        # Clean up response - remove markdown code blocks if present
+        cleaned = llm_response.strip()
+        if cleaned.startswith("```"):
+            cleaned = re.sub(r'^```(?:json)?\s*', '', cleaned)
+            cleaned = re.sub(r'\s*```$', '', cleaned)
+        
+        # Parse JSON
+        parsed = json.loads(cleaned)
+        
+        # Extract fields
+        result["is_official_website"] = bool(parsed.get("is_official_website", False))
+        result["official_url"] = parsed.get("official_url")
+        result["found_embedded_link"] = bool(parsed.get("found_embedded_link", False))
+        result["embedded_url"] = parsed.get("embedded_url")
+        result["reasoning"] = parsed.get("reasoning", "")
+        result["parse_success"] = True
+        
+    except (json.JSONDecodeError, KeyError, AttributeError) as e:
+        # Parsing failed - store raw response in reasoning
+        result["reasoning"] = f"PARSE_ERROR: {llm_response[:200]}"
+        result["parse_success"] = False
+    
+    return result
+
 def get_domain_fragment(url: str) -> str:
     """
     Extracts the core domain fragment for similarity matching.
@@ -152,8 +199,18 @@ def create_llm_prompt(company_data: Dict[str, Any], scraped_content: str) -> str
     #sic_code_str = ", ".join(company_data['sic_codes']) if company_data['sic_codes'] else "N/A"
     
     return f"""
-Your task is to find a company's official website by deciding if the two 
-sets of information match.
+You must respond with ONLY valid JSON. No other text before or after.
+
+Your task: Determine if Entity 2 is Entity 1's official website.
+
+Respond with this exact JSON structure:
+{{
+    "is_official_website": true or false,
+    "official_url": "url string or null",
+    "found_embedded_link": true or false,
+    "embedded_url": "url string or null",
+    "reasoning": "brief explanation"
+}}
 The following rules regarding company information needs to be 
 observed:
 1. The company name and the company name in the website 
@@ -171,9 +228,7 @@ based outside of the United Kingdom
 7. if Entity 2 contains website URL contains open.endole.co.uk,  please check for the official website link within the page and return that instead if found.
 Does the information from entity 2 match the company information 
 from entity 1?
-Answer with 'Yes' and the corresponding URL if they match, and 
-answer with 'No' if they do not.
-Or answer LINK and then with the link you have found to the entity 1's wesite, on open.endole.co.uk or similar if there is one. Do not give me a a open.endole.co.uk link at all.
+
 Entity 1:
 Company name: {company_data['company_name']}
 Company number: {company_data['company_number']}
@@ -183,7 +238,7 @@ SIC codes: {company_data['sic_code_desc']}
 Entity 2:
 {scraped_content[:15000]} 
 
-Answer:
+Answer in JSON format only:
 """
 
 
@@ -273,7 +328,7 @@ def main():
             # *** Proactive Throttle REMOVED ***
             
             # --- End Rate Limit Logic ---
-
+            llm_parsed = parse_llm_output(llm_answer)
             row = {
                 "company_number": company_data['company_number'],
                 "company_name": company_name,
@@ -283,8 +338,13 @@ def main():
                 #"is_correct_url": is_correct_url,
                 "string_match_result": string_match_result,
                 "Key_ID_match": Key_ID_match,
-                "llm_match_result": llm_answer,
-                "llm_match_url_in_response": llm_url
+                "llm_answer": llm_answer,
+                "llm_is_official_website": llm_parsed['is_official_website'],
+                "llm_official_url": llm_parsed['official_url'],
+                "llm_found_embedded_link": llm_parsed['found_embedded_link'],
+                "llm_embedded_url": llm_parsed['embedded_url'],
+                "llm_reasoning": llm_parsed['reasoning'],
+                "llm_parse_success": llm_parsed['parse_success']
             }
             analysis_results.append(row)
 
