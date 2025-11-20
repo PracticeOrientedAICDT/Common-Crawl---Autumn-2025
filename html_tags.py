@@ -1,65 +1,78 @@
-from bs4 import BeautifulSoup
-import pandas as pd
+import os
+import sys
+import json
+from urllib.parse import urlparse
+from typing import List, Dict, Any
 import requests
-from requests.exceptions import SSLError, ConnectionError
+from bs4 import BeautifulSoup
+from typing import Optional, List, Dict, Any
+import html2text
+import re
+import requests
+import json
+import pandas as pd
 
-# include file type in input/output filenames (include .csv)
-# will process all entries in input file if not specified in num_entries
-def extract_html_tags(input_filename, num_entries = None, output_filename = "output.csv"):
+# scrape to markdown function
+def ScrapeToText(url: str) -> Optional[str]:
+    """
+    Fetches the content of a given URL, cleans the HTML, and converts 
+    the body content into a plain text string suitable for an LLM.
+
+    Args:
+        url: The URL of the webpage to scrape.
+
+    Returns:
+        A string containing the page content in plain text format, or None on failure.
     
-    # load csv file
-    df = pd.read_csv(input_filename)
-    
-    # number of entries from input file to process
-    if num_entries == None:
-        df_subset = df
-        print("Using all rows from the input file")
-    else:
-        df_subset = df.iloc[:num_entries] # using only first 'num_entries' rows
-        print(f"Using first {num_entries} rows from the input file")
+    Dependancies: beautifulsoup4, html2text, requests
+    """
+    try:
+        # 1. Fetch the raw HTML content
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        response = requests.get(url, headers=headers, timeout=15)
+        response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
+
+        # 2. Parse the HTML using BeautifulSoup
+        soup = BeautifulSoup(response.content, 'html.parser')
+
+        # 3. Extract content from specific tags
+        tags_extract = ['title', 'address', 'header', 'footer']
+        extracted_content = []
         
-    # add columns for selected HTML tags
-    selected_tags = ["address", "title", "header", "footer"]
-    for tag in selected_tags:
-        df_subset[tag + "_tag"] = ""
-        
-    # iterate through URLs in dataframe
-    for url in df_subset["parent_url"]:
-        
-        # add https:// if url does not start with 'https://' to get valid url
-        if url.startswith("https://") == True:
-            fetch_url = url
-        else:
-            fetch_url = "https://" + url
-            
-        # get HTML content
-        try:
-            response = requests.get(fetch_url)
-            soup = BeautifulSoup(response.text, "html.parser")
-            
-        # skip urls that give SSL or connection errors (websites don't exist)
-        except SSLError:
-            print(f"SSL Error for URL: {fetch_url}")
-            continue
-        except ConnectionError:
-            print(f"Connection Error for URL: {fetch_url}")
-            continue
-        
-        # get desired HTML tags' content and add to dataframe
-        for tag_name in selected_tags:
-            found_tags = soup.find_all(tag_name)
-            
-            tag_text = []
-            for t in found_tags:
-                # get text from tag, remove extra whitespace
-                text = t.get_text(separator = " ", strip = True)
-                text = " ".join(text.split())
+        for tag_name in tags_extract:
+            tags = soup.find_all(tag_name)
+            for tag in tags:
+                text = tag.get_text(separator="\n", strip=True)
                 if text:
-                    tag_text.append(text)
-                    
-            # add tag text to dataframe, join multiple tag entries with " | "        
-            df_subset.loc[df_subset["parent_url"] == url, tag_name + "_tag"] = " | ".join(tag_text)
+                    extracted_content.append(text)
+        
+        # 4. Combine extracted content into plain text
+        if extracted_content:
+            return "\n".join(extracted_content)
+        else:
+            print(f"No content found in specified tags for {url}")
+            return None
 
-    # save dataframe to csv file
-    df_subset.to_csv(output_filename, index = False)
-    print(f"Saved output to {output_filename}")
+    except requests.exceptions.HTTPError as e:
+        print(f"Error fetching {url}: HTTP Error - {e}")
+        return None
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching {url}: Connection/Request Error - {e}")
+        return None
+    except requests.exception.Timeout as e:
+        print(f"Error fetching {url}: Timeout Error - {e}")
+        return None
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
+        return None
+
+# for testing:
+# if __name__ == "__main__":
+#     url = "https://shootingdirect.co.uk" # example URL
+#     result = ScrapeToText(url)
+#     if result:
+#         print(result)
+#     else:
+#         print("Failed to fetch or process the URL.")
