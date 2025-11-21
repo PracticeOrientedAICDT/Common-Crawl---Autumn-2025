@@ -13,6 +13,27 @@ import random
 import jellyfish
 
 
+def should_recurse(embedded_url: str, original_url: str, company_name: str) -> bool:
+    """
+    Decide if an embedded link is worth recursing on.
+    """
+    # Don't recurse to same domain
+    if urlparse(embedded_url).netloc == urlparse(original_url).netloc:
+        return False
+    
+    # Don't recurse to known aggregators
+    aggregator_domains = ['endole.co.uk', 'companieshouse.gov.uk', 'scooploop.com']
+    if any(agg in embedded_url for agg in aggregator_domains):
+        return False
+    
+    # Optional: String similarity check on embedded URL domain
+    domain_fragment = get_domain_fragment(embedded_url)
+    if URL_similarity_match(company_name, domain_fragment):
+        return True  # High confidence, definitely recurse
+    
+    # For others, maybe recurse with lower priority
+    return True
+
 #scrape to markdown function
 def ScrapeToMarkdown(url: str) -> Optional[str]:
     """
@@ -249,8 +270,7 @@ def load_companies_from_csv(filepath: str):
                 print(f"Loaded {i} rows so far...")
     print(f"✅ Finished loading {len(companies)} companies.\n")
     return companies
-import re
-from jellyfish  import levenshtein_distance
+
 
 def _clean_string(text: str) -> str:
     """Helper function to normalize and clean company/URL strings."""
@@ -327,7 +347,7 @@ def URL_similarity_match(registered_name: str, url_fragment: str) -> bool:
     return similarity_ratio >= threshold
 
 
-def extract_test_case(row_number: Optional[int] = None) -> List[str]:
+def extract_test_case_TP(row_number: Optional[int] = None) -> List[str]:
     """
     Extracts a specific test case row from the 'ground_truth_dataset.csv' file.
 
@@ -409,4 +429,95 @@ def extract_test_case(row_number: Optional[int] = None) -> List[str]:
         # Catch any other potential errors
         print(f"An unexpected error occurred: {e}")
         return []
+
+def extract_test_case_CH(row_number: Optional[int] = None) -> List[str]:
+    """
+    Extracts a specific test case row from the 'ground_truth_dataset.csv' file.
+
+    This function reads 'ground_truth_dataset.csv' located in the same folder,
+    assuming the first row (row 1) is the header.
+
+    It extracts data from the following 1-based (spreadsheet-style) columns:
+    - Column 1
+    - Column 6
+    - Column 4
+    
+    
+    - Column 31
+
+    Args:
+        row_number (Optional[int]): The 1-based (spreadsheet-style) row number
+            to extract. Row 1 is the header, so data starts at row 2.
+            If set to None (default), a random data row will be selected.
+
+    Returns:
+        List[str]: A list of strings containing the data from the
+            specified columns in the selected row.
+        
+        Returns an empty list [] if the file is not found, the row
+        number is out of bounds, or any other error occurs.
+    """
+    
+    # These are the 1-based (spreadsheet) column numbers you requested.
+    # We subtract 1 to get the 0-based index for pandas.
+    #COLUMN_INDICES = [1-1, 33-1,6-1,78-1,31-1,]
+    COLUMN_NAMES = [
+    'company_number',   # The header for (Col A)
+    'company_name',  # The header for (Col AG)
+    'data.address.postal_code',   # The header for (Col F)
+    'sic_descriptions_str',  # The header for index 77
+    'sic_codes'            # The header for index (Col AR)
+]
+    FILENAME = "500_allinfo_with_sic_desc.csv"
+    
+    try:
+        # Read the CSV. header=0 means the first row (index 0) is the header.
+        df = pd.read_csv(FILENAME, header=0, usecols=COLUMN_NAMES)
+        
+        # Get the total number of *data* rows
+        num_data_rows = len(df)
+        
+        # If the file is empty (no data rows), return empty list
+        if num_data_rows == 0:
+            return []
+            
+        selected_row_index = -1
+
+        if row_number is None:
+            # --- Random Row Selection ---
+            # Select a random 0-based index from 0 to (num_data_rows - 1)
+            selected_row_index = random.randint(0, num_data_rows - 1)
+            
+        else:
+            # --- Specific Row Selection ---
+            # User provides 1-based row number.
+            # Row 1 is header. Row 2 is the *first* data row (index 0).
+            # So, we subtract 2 to get the correct 0-based index.
+            selected_row_index = row_number - 2
+            
+            # Validate the requested index
+            if not (0 <= selected_row_index < num_data_rows):
+                print(f"Error: Row {row_number} is out of bounds.")
+                return []
+        
+        # Select the data using .iloc[row_index, column_indices]
+        selected_data = df.loc[selected_row_index, COLUMN_NAMES]
+        
+        # Convert all items to string and return as a list
+        output_list = [str(item) for item in selected_data]
+        
+        return output_list
+
+    except FileNotFoundError:
+        print(f"Error: File '{FILENAME}' not found.")
+        return []
+    except IndexError:
+        # This might happen if the file has fewer columns than requested
+        print("Error: Column index out of bounds. Check CSV structure.")
+        return []
+    except Exception as e:
+        # Catch any other potential errors
+        print(f"An unexpected error occurred: {e}")
+        return []
+
 
