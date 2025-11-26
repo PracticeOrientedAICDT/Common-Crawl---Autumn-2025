@@ -44,13 +44,13 @@ def ScrapeToText(url: str) -> Optional[str]:
         for tag_name in tags_extract:
             tags = soup.find_all(tag_name)
             for tag in tags:
-                text = tag.get_text(separator="\n", strip=True)
+                text = tag.get_text(separator=" ", strip=True)
                 if text:
                     extracted_content.append(text)
         
         # 4. Combine extracted content into plain text
         if extracted_content:
-            return "\n".join(extracted_content)
+            return " ".join(extracted_content)
         else:
             print(f"No content found in specified tags for {url}")
             return None
