@@ -354,13 +354,6 @@ def extract_test_case_TP(row_number: Optional[int] = None) -> List[str]:
     This function reads 'ground_truth_dataset.csv' located in the same folder,
     assuming the first row (row 1) is the header.
 
-    It extracts data from the following 1-based (spreadsheet-style) columns:
-    - Column 2
-    - Column 3
-    - Column 4
-    - Column 11
-    - Column 30
-    - Column 31
 
     Args:
         row_number (Optional[int]): The 1-based (spreadsheet-style) row number
@@ -375,14 +368,19 @@ def extract_test_case_TP(row_number: Optional[int] = None) -> List[str]:
         number is out of bounds, or any other error occurs.
     """
     
-    # These are the 1-based (spreadsheet) column numbers you requested.
-    # We subtract 1 to get the 0-based index for pandas.
-    COLUMN_INDICES = [2-1, 3-1, 4-1, 13-1, 30-1, 31-1]
+
+    COLUMN_NAMES = [
+    'company_number',   # The header for (Col A)
+    'CompanyName',  # The header for (Col AG)
+    'RegAddress.PostCode',   # The header for (Col F)
+    'SICCode.SicText_1',  # The header for index 77
+    'SICCode.SicText_2',            # The header for index (Col AR)
+    'source_url'           # The header for index (Col AS)
+]
     FILENAME = "ground_truth_dataset.csv"
-    
     try:
         # Read the CSV. header=0 means the first row (index 0) is the header.
-        df = pd.read_csv(FILENAME, header=0)
+        df = pd.read_csv(FILENAME, header=0, usecols=COLUMN_NAMES)
         
         # Get the total number of *data* rows
         num_data_rows = len(df)
@@ -411,7 +409,7 @@ def extract_test_case_TP(row_number: Optional[int] = None) -> List[str]:
                 return []
         
         # Select the data using .iloc[row_index, column_indices]
-        selected_data = df.iloc[selected_row_index, COLUMN_INDICES]
+        selected_data = df.loc[selected_row_index, COLUMN_NAMES]
         
         # Convert all items to string and return as a list
         output_list = [str(item) for item in selected_data]
@@ -464,11 +462,11 @@ def extract_test_case_CH(row_number: Optional[int] = None) -> List[str]:
     COLUMN_NAMES = [
     'company_number',   # The header for (Col A)
     'company_name',  # The header for (Col AG)
-    'data.address.postal_code',   # The header for (Col F)
+    'registered_office_address.postal_code',   # The header for (Col F)
     'sic_descriptions_str',  # The header for index 77
     'sic_codes'            # The header for index (Col AR)
 ]
-    FILENAME = "500_allinfo_with_sic_desc.csv"
+    FILENAME = "ground_truth_dataset.csv"
     
     try:
         # Read the CSV. header=0 means the first row (index 0) is the header.
