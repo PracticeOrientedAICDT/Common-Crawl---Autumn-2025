@@ -1,6 +1,5 @@
 # Data exploration
 
-Purpose
 This folder documents the exploratory data analysis (EDA) and dataset investigations that shaped design choices for the entity-matching pipeline linking Companies House records to official company websites.
 
 The goals of the exploration were to:
