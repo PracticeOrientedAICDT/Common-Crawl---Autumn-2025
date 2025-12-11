@@ -11,6 +11,7 @@ The goals of the exploration were to:
 Files in this folder:
 - Companies House EDA
 - Common Crawl EDA
+- Visuals 
 
 The data for both Companies House and Common Crawl was too large to upload to github. 
 
