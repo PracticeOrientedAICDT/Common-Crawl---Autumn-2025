@@ -13,6 +13,7 @@ Files in this folder:
 - Common Crawl EDA
 
 The data for both Companies House and Common Crawl was too large to upload to github. 
+
 The Companies House data can be downloaded from this link: https://download.companieshouse.gov.uk/en_output.html
 
 The Companies House People Of Significant Control data can be downloaded from this link: https://download.companieshouse.gov.uk/en_pscdata.html
