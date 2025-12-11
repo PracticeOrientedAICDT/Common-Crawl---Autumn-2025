@@ -1,4 +1,4 @@
-#Ground Truth Dataset Creation
+# Ground Truth Dataset Creation
 
 This details the process to create the ground truth dataset. The files invovled were:
 
