@@ -40,16 +40,6 @@ info_pages_count = df['is_info_page'].sum()
 # Pages with very short content (<50 words)
 short_pages_count = df['content'].apply(lambda x: len(str(x).split()) < 50).sum()
 
-def safe_detect(text):
-    try:
-        return detect(text)
-    except:
-        return "unknown"
-
-df['language'] = df['content'].apply(safe_detect)
-
-language_counts = df['language'].value_counts().to_dict()
-
 # Distribution of pages per website (parent_url)
 pages_per_website = df.groupby('parent_url').size()
 website_distribution_summary = {
@@ -71,8 +61,7 @@ summary = {
     'unique_websites': unique_websites,
     'info_pages_count': info_pages_count,
     'short_pages_count': short_pages_count,
-    'website_distribution_summary': website_distribution_summary,
-    'sample_language_distribution': language_counts
+    'website_distribution_summary': website_distribution_summary
 }
 
 print("Common Crawl CSV Summary:")
