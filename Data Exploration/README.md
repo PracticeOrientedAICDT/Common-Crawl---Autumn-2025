@@ -11,7 +11,8 @@ The goals of the exploration were to:
 Files in this folder:
 - Companies House EDA
 - Common Crawl EDA
-- Visuals 
+- Visuals
+- dataset_visuals : contains the visuals outputed from visuals.py
 
 The data for both Companies House and Common Crawl was too large to upload to github. 
 
