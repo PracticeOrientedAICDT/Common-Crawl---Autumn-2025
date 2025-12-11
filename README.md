@@ -9,5 +9,5 @@ The project is structured into three main folders:
 
 /Data Modelling
 
-Each folder contains raw data, cleaned outputs, and supporting analysis scripts.
+Each folder contains raw data(where possible), cleaned outputs, and supporting analysis scripts.
 
