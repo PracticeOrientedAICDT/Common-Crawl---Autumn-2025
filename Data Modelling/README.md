@@ -9,3 +9,4 @@ Files in this folder:
 - Scrape_Utils - conatins a lot of functions that were developed for this project, not all of them are still used, but they all provide potentially useful capabilities. 
 - html_tags - function to scrape the selected content of a website and convert to plain text for use in Search_scrape_P1
 - matching_prompts - Word document containing the different prompt designs for the LLM matching strategy used in Matching_P1
+- scraper_results_Random_CH.json - Is an example of the output from Search_scrape_P1 for a random CH sample.  
